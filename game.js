@@ -398,7 +398,7 @@
 
   const AI_DEPTH = 6;
   const AI_MOVE_ORDER = [3, 2, 4, 1, 5, 0, 6];
-  const AI_SCORE_WIN = 1_000_000;
+  const AI_SCORE_WIN = 1000000;
 
   function aiValidCols(board) {
     const valid = [];
