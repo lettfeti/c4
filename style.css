@@ -289,7 +289,7 @@ input[type="text"]:focus {
   aspect-ratio: 7 / 6;
   background: linear-gradient(180deg, var(--board-1), var(--board-2));
   border-radius: 16px;
-  padding: 2.2%;
+  padding: 3.7%;
   box-shadow:
     0 16px 40px rgba(0, 0, 0, 0.45),
     inset 0 2px 4px rgba(255, 255, 255, 0.18),
@@ -354,7 +354,7 @@ input[type="text"]:focus {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 4%;
-  padding: 2.2%;
+  padding: 3.7%;
 }
 .col {
   cursor: pointer;
