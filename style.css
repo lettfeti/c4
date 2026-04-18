@@ -279,13 +279,12 @@ input[type="text"]:focus {
 
 .board-wrap {
   width: 100%;
-  display: flex;
-  justify-content: center;
 }
 .board {
   position: relative;
   width: 100%;
   max-width: 480px;
+  margin: 0 auto;
   aspect-ratio: 7 / 6;
   background: linear-gradient(180deg, var(--board-1), var(--board-2));
   border-radius: 16px;
