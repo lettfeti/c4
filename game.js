@@ -27,6 +27,7 @@
     oppWantsRematch: false,
     connected: false,
     gameScore: { R: 0, Y: 0, D: 0 },
+    solo: false,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -129,6 +130,7 @@
 
   function hostGame() {
     const code = genCode();
+    S.solo = false;
     S.code = code;
     S.isHost = true;
     S.myColor = 'R';
@@ -192,6 +194,7 @@
       $('joinStatus').textContent = 'Code must be 6 characters.';
       return;
     }
+    S.solo = false;
     S.code = code;
     S.isHost = false;
     S.myColor = 'Y';
@@ -330,6 +333,7 @@
     $('endbar').hidden = true;
     show('game');
     updateHUD();
+    scheduleAi();
   }
 
   function maybeStartRematch() {
@@ -346,7 +350,7 @@
     if (S.winner) return;
     if (S.turn !== S.myColor) return;
     if (S.board[0][col]) return;
-    send({ type: 'move', col });
+    if (!S.solo) send({ type: 'move', col });
     applyMove(col, S.myColor);
     if (navigator.vibrate) { try { navigator.vibrate(8); } catch {} }
   }
@@ -371,8 +375,136 @@
       setTimeout(onGameEnd, 420);
     } else {
       S.turn = S.turn === 'R' ? 'Y' : 'R';
+      scheduleAi();
     }
     updateHUD();
+  }
+
+  // ---------- Solo / AI ----------
+  function soloGame() {
+    destroyPeer();
+    S.solo = true;
+    S.isHost = false;
+    S.code = null;
+    S.myColor = 'R';
+    S.oppColor = 'Y';
+    S.firstOfGame = 'R';
+    S.oppName = 'CPU';
+    S.gameScore = { R: 0, Y: 0, D: 0 };
+    startNewGame();
+    setConnDot(true);
+    $('connText').textContent = 'Solo';
+  }
+
+  const AI_DEPTH = 6;
+  const AI_MOVE_ORDER = [3, 2, 4, 1, 5, 0, 6];
+  const AI_SCORE_WIN = 1_000_000;
+
+  function aiValidCols(board) {
+    const valid = [];
+    for (const c of AI_MOVE_ORDER) if (lowestRow(board, c) >= 0) valid.push(c);
+    return valid;
+  }
+
+  function aiEvalWindow(a, b, c, d, ai, opp) {
+    let ac = 0, oc = 0, ec = 0;
+    if (a === ai) ac++; else if (a === opp) oc++; else ec++;
+    if (b === ai) ac++; else if (b === opp) oc++; else ec++;
+    if (c === ai) ac++; else if (c === opp) oc++; else ec++;
+    if (d === ai) ac++; else if (d === opp) oc++; else ec++;
+    if (ac && oc) return 0;
+    if (ac === 3 && ec === 1) return 50;
+    if (ac === 2 && ec === 2) return 5;
+    if (oc === 3 && ec === 1) return -80;
+    if (oc === 2 && ec === 2) return -4;
+    return 0;
+  }
+
+  function aiEvaluate(board, ai, opp) {
+    let s = 0;
+    for (let r = 0; r < ROWS; r++) {
+      if (board[r][3] === ai) s += 6;
+      else if (board[r][3] === opp) s -= 6;
+    }
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c <= COLS - 4; c++)
+        s += aiEvalWindow(board[r][c], board[r][c+1], board[r][c+2], board[r][c+3], ai, opp);
+    for (let c = 0; c < COLS; c++)
+      for (let r = 0; r <= ROWS - 4; r++)
+        s += aiEvalWindow(board[r][c], board[r+1][c], board[r+2][c], board[r+3][c], ai, opp);
+    for (let r = 3; r < ROWS; r++)
+      for (let c = 0; c <= COLS - 4; c++)
+        s += aiEvalWindow(board[r][c], board[r-1][c+1], board[r-2][c+2], board[r-3][c+3], ai, opp);
+    for (let r = 0; r <= ROWS - 4; r++)
+      for (let c = 0; c <= COLS - 4; c++)
+        s += aiEvalWindow(board[r][c], board[r+1][c+1], board[r+2][c+2], board[r+3][c+3], ai, opp);
+    return s;
+  }
+
+  function aiMinimax(board, depth, alpha, beta, maximizing, ai, opp) {
+    const valid = aiValidCols(board);
+    if (!valid.length) return 0;
+    if (depth === 0) return aiEvaluate(board, ai, opp);
+    if (maximizing) {
+      let best = -Infinity;
+      for (const c of valid) {
+        const r = lowestRow(board, c);
+        board[r][c] = ai;
+        const win = checkWin(board, r, c);
+        const score = win ? AI_SCORE_WIN + depth
+          : aiMinimax(board, depth - 1, alpha, beta, false, ai, opp);
+        board[r][c] = null;
+        if (score > best) best = score;
+        if (best > alpha) alpha = best;
+        if (alpha >= beta) break;
+      }
+      return best;
+    } else {
+      let best = Infinity;
+      for (const c of valid) {
+        const r = lowestRow(board, c);
+        board[r][c] = opp;
+        const win = checkWin(board, r, c);
+        const score = win ? -AI_SCORE_WIN - depth
+          : aiMinimax(board, depth - 1, alpha, beta, true, ai, opp);
+        board[r][c] = null;
+        if (score < best) best = score;
+        if (best < beta) beta = best;
+        if (alpha >= beta) break;
+      }
+      return best;
+    }
+  }
+
+  function aiPickMove() {
+    const ai = S.oppColor;
+    const opp = S.myColor;
+    const valid = aiValidCols(S.board);
+    if (!valid.length) return -1;
+    let bestScore = -Infinity;
+    let bestMove = valid[0];
+    let alpha = -Infinity;
+    const beta = Infinity;
+    for (const c of valid) {
+      const r = lowestRow(S.board, c);
+      S.board[r][c] = ai;
+      const win = checkWin(S.board, r, c);
+      const score = win ? AI_SCORE_WIN + AI_DEPTH
+        : aiMinimax(S.board, AI_DEPTH - 1, alpha, beta, false, ai, opp);
+      S.board[r][c] = null;
+      if (score > bestScore) { bestScore = score; bestMove = c; }
+      if (score > alpha) alpha = score;
+    }
+    return bestMove;
+  }
+
+  function scheduleAi() {
+    if (!S.solo || S.winner || S.turn !== S.oppColor) return;
+    setTimeout(() => {
+      if (!S.solo || S.winner || S.turn !== S.oppColor) return;
+      const c = aiPickMove();
+      if (c >= 0) applyMove(c, S.oppColor);
+    }, 650);
   }
 
   function onGameEnd() {
@@ -540,6 +672,7 @@
   function goHome() {
     if (S.screen === 'game' && S.connected) { send({ type: 'bye' }); }
     destroyPeer();
+    S.solo = false;
     S.winner = null;
     S.board = null;
     show('home');
@@ -565,6 +698,10 @@
       $('joinCode').value = '';
       $('joinStatus').textContent = '';
       setTimeout(() => $('joinCode').focus(), 50);
+    });
+    $('soloBtn').addEventListener('click', () => {
+      if (!S.myName) { nameInput.focus(); nameInput.placeholder = 'Enter your name first'; return; }
+      soloGame();
     });
     $('statsBtn').addEventListener('click', () => { renderStats(); show('stats'); });
 
@@ -596,6 +733,11 @@
     });
 
     $('rematchBtn').addEventListener('click', () => {
+      if (S.solo) {
+        S.firstOfGame = S.firstOfGame === 'R' ? 'Y' : 'R';
+        startNewGame();
+        return;
+      }
       if (!S.connected) { goHome(); return; }
       S.myWantsRematch = true;
       send({ type: 'rematch' });
