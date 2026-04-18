@@ -548,11 +548,18 @@
       cols.appendChild(colEl);
     }
     cols.onpointerdown = (e) => {
-      const target = e.target.closest('.col');
-      if (!target) return;
-      target.classList.add('hot');
-      setTimeout(() => target.classList.remove('hot'), 160);
-      const c = Number(target.dataset.c);
+      const board = $('board');
+      const rect = board.getBoundingClientRect();
+      const padX = rect.width * 0.037;
+      const inner = rect.width - 2 * padX;
+      if (inner <= 0) return;
+      const relX = (e.clientX - rect.left - padX) / inner;
+      const c = Math.min(COLS - 1, Math.max(0, Math.floor(relX * COLS)));
+      const target = cols.children[c];
+      if (target) {
+        target.classList.add('hot');
+        setTimeout(() => target.classList.remove('hot'), 160);
+      }
       handleColumnTap(c);
     };
   }
