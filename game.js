@@ -98,10 +98,34 @@
   }
 
   // ---------- PeerJS ----------
+  const TRANSIENT_ERRORS = new Set(['network', 'socket-error', 'socket-closed', 'server-error', 'disconnected']);
+  const ERROR_MESSAGES = {
+    'network': 'Network issue — check your connection',
+    'socket-error': 'Network issue — check your connection',
+    'socket-closed': 'Connection dropped — check your connection',
+    'server-error': 'Matchmaking server unavailable',
+    'disconnected': 'Disconnected from matchmaking server',
+    'browser-incompatible': 'Browser does not support WebRTC',
+    'ssl-unavailable': 'Secure connection unavailable',
+    'peer-unavailable': 'Could not find that game. Check the code.',
+    'invalid-id': 'Invalid game code',
+    'unavailable-id': 'Code already in use',
+    'webrtc': 'WebRTC connection failed',
+  };
+  function errText(err) {
+    return ERROR_MESSAGES[err && err.type] || (err && err.message) || 'Unknown error';
+  }
+
   function createPeer(id) {
+    if (typeof Peer === 'undefined') {
+      throw new Error('PeerJS library did not load. Reload the page.');
+    }
     const opts = { debug: 1 };
     return id ? new Peer(id, opts) : new Peer(opts);
   }
+
+  let hostRetries = 0;
+  let joinRetries = 0;
 
   function hostGame() {
     const code = genCode();
@@ -113,12 +137,24 @@
     show('waiting');
     $('codeDisplay').textContent = code;
     $('hostStatus').textContent = 'Starting…';
+    $('hostRetryBtn').hidden = true;
+    $('hostSpinner').hidden = false;
 
     destroyPeer();
-    const peer = createPeer(peerIdFromCode(code));
+    let peer;
+    try {
+      peer = createPeer(peerIdFromCode(code));
+    } catch (e) {
+      console.error(e);
+      $('hostStatus').textContent = e.message;
+      $('hostSpinner').hidden = true;
+      $('hostRetryBtn').hidden = false;
+      return;
+    }
     S.peer = peer;
 
     peer.on('open', () => {
+      hostRetries = 0;
       $('hostStatus').textContent = 'Waiting for opponent…';
     });
     peer.on('connection', (conn) => {
@@ -126,14 +162,27 @@
       S.conn = conn;
       setupConn(conn);
     });
+    peer.on('disconnected', () => {
+      console.warn('peer disconnected from broker — attempting reconnect');
+      try { peer.reconnect(); } catch (e) { console.error(e); }
+    });
     peer.on('error', (err) => {
-      console.error('peer error', err);
+      console.error('[host] peer error', err);
       if (err.type === 'unavailable-id') {
         destroyPeer();
         setTimeout(hostGame, 200);
-      } else {
-        $('hostStatus').textContent = 'Error: ' + (err.type || 'unknown');
+        return;
       }
+      if (TRANSIENT_ERRORS.has(err.type) && hostRetries < 2) {
+        hostRetries++;
+        $('hostStatus').textContent = `Network hiccup, retrying… (${hostRetries}/2)`;
+        destroyPeer();
+        setTimeout(hostGame, 900 * hostRetries);
+        return;
+      }
+      $('hostStatus').textContent = errText(err);
+      $('hostSpinner').hidden = true;
+      $('hostRetryBtn').hidden = false;
     });
   }
 
@@ -150,27 +199,52 @@
     S.firstOfGame = 'R';
     show('connecting');
     $('connectStatus').textContent = 'Finding opponent…';
+    $('joinRetryBtn').hidden = true;
+    $('connectSpinner').hidden = false;
 
     destroyPeer();
-    const peer = createPeer(null);
+    let peer;
+    try {
+      peer = createPeer(null);
+    } catch (e) {
+      console.error(e);
+      $('connectStatus').textContent = e.message;
+      $('connectSpinner').hidden = true;
+      $('joinRetryBtn').hidden = false;
+      return;
+    }
     S.peer = peer;
 
     peer.on('open', () => {
-      $('connectStatus').textContent = 'Connecting…';
+      joinRetries = 0;
+      $('connectStatus').textContent = 'Connecting to opponent…';
       const conn = peer.connect(peerIdFromCode(code), { reliable: true });
       S.conn = conn;
       setupConn(conn);
-      // Safety timeout
       setTimeout(() => {
         if (!S.connected && S.screen === 'connecting') {
           $('connectStatus').textContent = 'Could not find that game. Check the code.';
+          $('connectSpinner').hidden = true;
+          $('joinRetryBtn').hidden = false;
         }
-      }, 8000);
+      }, 9000);
+    });
+    peer.on('disconnected', () => {
+      try { peer.reconnect(); } catch (e) { console.error(e); }
     });
     peer.on('error', (err) => {
-      console.error('peer error', err);
+      console.error('[join] peer error', err);
+      if (TRANSIENT_ERRORS.has(err.type) && joinRetries < 2) {
+        joinRetries++;
+        $('connectStatus').textContent = `Network hiccup, retrying… (${joinRetries}/2)`;
+        destroyPeer();
+        setTimeout(() => joinGame(code), 900 * joinRetries);
+        return;
+      }
       if (S.screen === 'connecting') {
-        $('connectStatus').textContent = 'Error: ' + (err.type || 'unknown');
+        $('connectStatus').textContent = errText(err);
+        $('connectSpinner').hidden = true;
+        $('joinRetryBtn').hidden = false;
       }
     });
   }
@@ -510,6 +584,15 @@
     $('joinGoBtn').addEventListener('click', () => joinGame($('joinCode').value));
     $('joinCode').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') joinGame(e.target.value);
+    });
+
+    $('hostRetryBtn').addEventListener('click', () => {
+      hostRetries = 0;
+      hostGame();
+    });
+    $('joinRetryBtn').addEventListener('click', () => {
+      joinRetries = 0;
+      if (S.code) joinGame(S.code); else goHome();
     });
 
     $('rematchBtn').addEventListener('click', () => {

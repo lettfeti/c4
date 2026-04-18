@@ -48,7 +48,8 @@
       <button class="btn" id="copyLinkBtn">Copy link</button>
     </div>
     <p class="status" id="hostStatus">Starting…</p>
-    <div class="spinner" aria-hidden="true"></div>
+    <div class="spinner" id="hostSpinner" aria-hidden="true"></div>
+    <button class="btn primary" id="hostRetryBtn" hidden>Try again</button>
   </section>
 
   <!-- JOIN -->
@@ -65,8 +66,9 @@
   <!-- CONNECTING -->
   <section class="screen" data-screen="connecting" hidden>
     <h2>Connecting…</h2>
-    <div class="spinner" aria-hidden="true"></div>
+    <div class="spinner" id="connectSpinner" aria-hidden="true"></div>
     <p class="status" id="connectStatus">Finding opponent</p>
+    <button class="btn primary" id="joinRetryBtn" hidden>Try again</button>
     <button class="btn ghost" data-back>Cancel</button>
   </section>
 
@@ -120,7 +122,7 @@
 
 </div>
 
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="peerjs.min.js"></script>
 <script src="game.js"></script>
 </body>
 </html>
